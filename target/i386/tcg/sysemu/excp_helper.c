@@ -1572,11 +1572,11 @@ static inline uint64_t get_pte_addr_flat(uint64_t parent, uint64_t addr, int32_t
 
 static void print_radix_record(MemRecord * record)
 {
-    QEMU_LOG_TRANSLATE(0, CPU_LOG_MMU, "Radix Translate: vaddr=%lx PTE0=%lx PTE1=%lx PTE2=%lx PTE3=%lx paddr=%lx\n", 
-        record->vaddr, record->leaves[0], record->leaves[1], record->leaves[2], record->leaves[3], record->paddr);
-
-    // printf( "Radix Translate: vaddr=%lx PTE0=%lx PTE1=%lx PTE2=%lx PTE3=%lx paddr=%lx\n", 
+    // QEMU_LOG_TRANSLATE(0, CPU_LOG_MMU, "Radix Translate: vaddr=%lx PTE0=%lx PTE1=%lx PTE2=%lx PTE3=%lx paddr=%lx\n", 
     //     record->vaddr, record->leaves[0], record->leaves[1], record->leaves[2], record->leaves[3], record->paddr);
+
+    printf( "Radix Translate: vaddr=%lx PTE0=%lx PTE1=%lx PTE2=%lx PTE3=%lx pte=%lx paddr=%lx\n", 
+        record->vaddr, record->leaves[0], record->leaves[1], record->leaves[2], record->leaves[3], record->pte, record->paddr);
 }
 
 
@@ -1943,6 +1943,9 @@ do_check_protect_pse36:
         (((pg_mode & PG_MODE_NXE) && (pg_mode & PG_MODE_PAE)) ||
          (pg_mode & PG_MODE_SMEP)))
         error_code |= PG_ERROR_I_D_MASK;
+    // if (level_folded) {
+    //     print_radix_record(&record);
+    // }
     return error_code;
 }
 
