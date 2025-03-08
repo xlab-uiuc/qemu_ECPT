@@ -1096,12 +1096,16 @@ struct radix_trans_info {
     uint64_t paddr;
     uint64_t page_size;
 };
-
+#ifdef TARGET_X86_64_FPT
+__attribute__((unused))
+#endif
 static void print_radix_info(struct radix_trans_info * info) {
     QEMU_LOG_TRANSLATE(0, CPU_LOG_MMU, "Radix Translate: vaddr=%lx PTE0=%lx PTE1=%lx PTE2=%lx PTE3=%lx paddr=%lx page_size=%lx\n", 
         info->vaddr, info->PTEs[0], info->PTEs[1], info->PTEs[2], info->PTEs[3], info->paddr, info->page_size);
 }
-
+#ifdef TARGET_X86_64_FPT
+__attribute__((unused))
+#endif
 /* This is used for address translation dumping */
 static unsigned long mmu_translate_pgtables(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
                                             uint64_t cr3,int mmu_idx, int pg_mode,
@@ -1570,19 +1574,19 @@ static inline uint64_t get_pte_addr_flat(uint64_t parent, uint64_t addr, int32_t
 }
 
 
-static void print_radix_record(MemRecord * record)
-{
+// static void print_radix_record(MemRecord * record)
+// {
     // QEMU_LOG_TRANSLATE(0, CPU_LOG_MMU, "Radix Translate: vaddr=%lx PTE0=%lx PTE1=%lx PTE2=%lx PTE3=%lx paddr=%lx\n", 
     //     record->vaddr, record->leaves[0], record->leaves[1], record->leaves[2], record->leaves[3], record->paddr);
 
-    printf( "Radix Translate: vaddr=%lx PTE0=%lx PTE1=%lx PTE2=%lx PTE3=%lx pte=%lx paddr=%lx\n", 
-        record->vaddr, record->leaves[0], record->leaves[1], record->leaves[2], record->leaves[3], record->pte, record->paddr);
-}
+    // printf( "Radix Translate: vaddr=%lx PTE0=%lx PTE1=%lx PTE2=%lx PTE3=%lx pte=%lx paddr=%lx\n", 
+    //     record->vaddr, record->leaves[0], record->leaves[1], record->leaves[2], record->leaves[3], record->pte, record->paddr);
+// }
 
 
 static int mmu_translate_fpt(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
                          uint64_t cr3, int is_write1, int mmu_idx, int pg_mode, int gdb,
-                         hwaddr *xlat, int *page_size, int *prot)
+                         hwaddr *xlat, int *page_size, int *prot, MemRecord * rec)
 {
     X86CPU *cpu = X86_CPU(cs);
     CPUX86State *env = &cpu->env;
@@ -1599,12 +1603,7 @@ static int mmu_translate_fpt(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hph
     is_write = is_write1 & 1;
     a20_mask = x86_get_a20_mask(env);
 
-    int level_folded = 0;
-    MemRecord record = {};
-    // struct radix_trans_info walk_info;
-    // memset(&walk_info, 0, sizeof(struct radix_trans_info));
-    record.vaddr = addr;
-    // QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "Radix Translate: addr=%" VADDR_PRIx " w=%d mmu=%d\n", addr, is_write1, mmu_idx);
+    __attribute__((unused)) int level_folded = 0;
 
     if (!(pg_mode & PG_MODE_NXE)) {
         rsvd_mask |= PG_NX_MASK;
@@ -1664,7 +1663,10 @@ static int mmu_translate_fpt(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hph
                     (((addr >> 39) & 0x1ff) << 3)) & a20_mask;
             pml4e_addr = GET_HPHYS(cs, pml4e_addr, MMU_DATA_STORE, NULL);
             
-            record.leaves[0] = pml4e_addr;
+            if (rec != NULL) {
+                rec->leaves[0] = pml4e_addr;
+            }
+            // record.leaves[0] = pml4e_addr;
 
             pml4e = x86_ldq_phys(cs, pml4e_addr);
             if (!(pml4e & PG_PRESENT_MASK)) {
@@ -1694,7 +1696,10 @@ static int mmu_translate_fpt(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hph
 
 pdpe_addr_ready:
             pdpe_addr = GET_HPHYS(cs, pdpe_addr, MMU_DATA_STORE, NULL);
-            record.leaves[1] = pdpe_addr;
+            if (rec != NULL) {
+                rec->leaves[1] = pdpe_addr;
+            }
+            // record.leaves[1] = pdpe_addr;
 
             pdpe = x86_ldq_phys(cs, pdpe_addr);
             if (!(pdpe & PG_PRESENT_MASK)) {
@@ -1747,8 +1752,9 @@ pdpe_addr_ready:
 
 pde_addr_ready:
         pde_addr = GET_HPHYS(cs, pde_addr, MMU_DATA_STORE, NULL);
-        record.leaves[2] = pde_addr;        
-
+        if (rec != NULL) {
+            rec->leaves[2] = pde_addr;
+        }    
         pde = x86_ldq_phys(cs, pde_addr);
 
         if (!(pde & PG_PRESENT_MASK)) {
@@ -1775,8 +1781,9 @@ pde_addr_ready:
         
 pte_addr_ready:        
         pte_addr = GET_HPHYS(cs, pte_addr, MMU_DATA_STORE, NULL);
-        record.leaves[3] = pte_addr;
-
+        if (rec != NULL) {
+            rec->leaves[3] = pte_addr;
+        }
         pte = x86_ldq_phys(cs, pte_addr);
 
 
@@ -1923,11 +1930,16 @@ do_check_protect_pse36:
     page_offset = addr & (*page_size - 1);
     *xlat = GET_HPHYS(cs, pte + page_offset, is_write1, prot);
 
-    record.paddr = *xlat;
-    record.pte = pte;
-    if (level_folded) {
-        print_radix_record(&record);
+    // record.paddr = *xlat;
+    // record.pte = pte;
+    if (rec != NULL) {
+        rec->paddr = *xlat;
+        rec->pte = pte;
     }
+
+    // if (level_folded) {
+    //     print_radix_record(&record);
+    // }
 
     return PG_ERROR_OK;
 
@@ -1958,7 +1970,7 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
 
 #ifdef TARGET_X86_64_FPT
 
-    return mmu_translate_fpt(cs, addr, get_hphys_func, cr3, is_write1, mmu_idx, pg_mode, gdb, xlat, page_size, prot);
+    return mmu_translate_fpt(cs, addr, get_hphys_func, cr3, is_write1, mmu_idx, pg_mode, gdb, xlat, page_size, prot, NULL);
 #else 
     return mmu_translate_radix(cs, addr, get_hphys_func, cr3, is_write1, mmu_idx, pg_mode, gdb, xlat, page_size, prot);
 #endif
@@ -2130,6 +2142,44 @@ unsigned long x86_tlb_fill_pgtables(CPUState *cs, vaddr addr, int size,
                     addr, env->eip, error_code, paddr, page_size, prot);
     }
     return paddr;
+#elif defined TARGET_X86_64_FPT
+    int prot;
+    /**
+     * NOTE: we set mmu_idx to MMU_KNOSMAP_IDX, which indicates privelege level of kernel access.
+     *  This is a hack to bypass warning message of fail to page table when dumping translation info in mmu_translate_fpt.
+     *  What would happen is that at page fault time, we somehow get an incorrect mmu_idx (MMU_USER_IDX) but to access
+     *  a kernel address space (cpu_entry area). 
+     * 
+     * Example:
+     *  FPT Translate: addr=fffffe0000000ec0 eip=40159e w=0 mmu=1
+     *  FPT Translate: load from entry at 0x0000000002c88040 pte at 0x0000000002c88040 pte=0x8000000004290161 way=0
+     *  Checking prot is_user=1 !(ptep & PG_USER_MASK)=1
+     * 
+     * The page table query result here is correct, but protection check fails;
+     * as a result, we get incorrect paddr info which is recorded after the protection check.
+     * 
+     * Ideally, we should fix the mmu_idx fed here in translate_guest_virtual function (cputlb.c),
+     * but it seems like already have the correct cpu_mmu_idx function, so it seems more like a issue within 
+     * the QEMU plugin system. 
+     * The radix translation dump doesn't have this problem, because the implemented mmu_translate_pgtables function
+     * never checks user access or kernel access.
+     * 
+     * Our hack can serve as a temporary solution because address translation dump is to simulate performance;
+     * permissino correctness checks are properly checked at runtime (handle_mmu_fault) which has the correct mmu_idx.
+     */
+    mmu_idx = MMU_KNOSMAP_IDX;
+    int page_size = 0;
+    int error_code =
+        mmu_translate_fpt(cs, addr, get_hphys, env->cr[3], MMU_DATA_LOAD,
+                          mmu_idx, pg_mode, 0 /* gdb */, &paddr, &page_size,
+                          &prot, rec);
+    
+    if (error_code != PG_ERROR_OK) {
+        warn_report("FPT fill pgtable failure: addr=%lx", addr);
+    }
+
+    return paddr;
+
 #else
     /* radix */
     unsigned int page_size = 0;
