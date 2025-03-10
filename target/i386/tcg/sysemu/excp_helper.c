@@ -32,6 +32,7 @@
 #include "tcg/sysemu/MemRecord.h"
 #include <assert.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <sys/types.h>
 
 #ifdef TARGET_X86_64_ECPT
@@ -1559,7 +1560,7 @@ static inline unsigned long acquire_pgtable_index(unsigned long address,
 
 
 static inline uint64_t get_pdpe_addr_flat(uint64_t parent, uint64_t addr, int32_t a20_mask) {
-    uint64_t index = acquire_pgtable_index(addr, PAGE_SHIFT_1GB, 512);
+    uint64_t index = acquire_pgtable_index(addr, PAGE_SHIFT_1GB, 512 * 512);
     return ((parent & PG_ADDRESS_MASK) + (index << 3)) & a20_mask;
 }
 
@@ -1569,19 +1570,19 @@ static inline uint64_t get_pde_addr_flat(uint64_t parent, uint64_t addr, int32_t
 }
 
 static inline uint64_t get_pte_addr_flat(uint64_t parent, uint64_t addr, int32_t a20_mask) {
-    uint64_t index = acquire_pgtable_index(addr, PAGE_SHIFT_4KB, 512);
+    uint64_t index = acquire_pgtable_index(addr, PAGE_SHIFT_4KB, 512 * 512);
     return ((parent & PG_ADDRESS_MASK) + (index << 3)) & a20_mask;
 }
 
 
-// static void print_radix_record(MemRecord * record)
-// {
+static void print_radix_record(MemRecord * record)
+{
     // QEMU_LOG_TRANSLATE(0, CPU_LOG_MMU, "Radix Translate: vaddr=%lx PTE0=%lx PTE1=%lx PTE2=%lx PTE3=%lx paddr=%lx\n", 
     //     record->vaddr, record->leaves[0], record->leaves[1], record->leaves[2], record->leaves[3], record->paddr);
 
     // printf( "Radix Translate: vaddr=%lx PTE0=%lx PTE1=%lx PTE2=%lx PTE3=%lx pte=%lx paddr=%lx\n", 
-    //     record->vaddr, record->leaves[0], record->leaves[1], record->leaves[2], record->leaves[3], record->pte, record->paddr);
-// }
+        // record->vaddr, record->leaves[0], record->leaves[1], record->leaves[2], record->leaves[3], record->pte, record->paddr);
+}
 
 
 static int mmu_translate_fpt(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_func,
@@ -1604,6 +1605,10 @@ static int mmu_translate_fpt(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hph
     a20_mask = x86_get_a20_mask(env);
 
     __attribute__((unused)) int level_folded = 0;
+    if (rec != NULL) {
+        /* TODO: remove after finish debugging */
+        rec->vaddr = addr;
+    }
 
     if (!(pg_mode & PG_MODE_NXE)) {
         rsvd_mask |= PG_NX_MASK;
@@ -1649,13 +1654,13 @@ static int mmu_translate_fpt(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hph
                 pml5e = cr3;
                 ptep = PG_NX_MASK | PG_USER_MASK | PG_RW_MASK;
             }
-
+            // printf("pml5e=%016lx\n", pml5e);
             if (L4_L3_IS_FOLDED(pml5e)) {
-                QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "FPT Translate (L4+L3 folded): addr=%016lx pml5e_addr=%016lx pml5e=%016lx\n",
-                    addr, pml5e_addr, pml5e);
                 
                 level_folded = 1;
                 pdpe_addr = get_pdpe_addr_flat(pml5e, addr, a20_mask);
+                QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "FPT Translate (L4+L3 folded): addr=%016lx pml5e_addr=%016lx pml5e=%016lx pdpe_addr=%016lx\n",
+                    addr, pml5e_addr, pml5e, pdpe_addr);
                 goto pdpe_addr_ready;
             }
 
@@ -1739,11 +1744,10 @@ pdpe_addr_ready:
         }
 
         if (NEXT_LEVEL_IS_FOLDED(pdpe)) {
-            QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "FPT Translate (L2+L1 folded): addr=%lx pdpe_addr=%lx pdpe=%lx\n",
-                addr, pdpe_addr, pdpe);
-
             level_folded = 3;
             pte_addr = get_pte_addr_flat(pdpe, addr, a20_mask);
+            QEMU_LOG_TRANSLATE(gdb, CPU_LOG_MMU, "FPT Translate (L2+L1 folded): addr=%lx pdpe_addr=%lx pdpe=%lx pte_addr=%lx\n",
+                addr, pdpe_addr, pdpe, pte_addr);
             goto pte_addr_ready;
         }
 
@@ -1937,9 +1941,9 @@ do_check_protect_pse36:
         rec->pte = pte;
     }
 
-    // if (level_folded) {
-    //     print_radix_record(&record);
-    // }
+    if (level_folded && rec != NULL) {
+        print_radix_record(rec);
+    }
 
     return PG_ERROR_OK;
 
@@ -1969,6 +1973,8 @@ static int mmu_translate(CPUState *cs, hwaddr addr, MMUTranslateFunc get_hphys_f
                          hwaddr *xlat, int *page_size, int *prot) {
 
 #ifdef TARGET_X86_64_FPT
+    // MemRecord record = {0};                 
+    // return mmu_translate_fpt(cs, addr, get_hphys_func, cr3, is_write1, mmu_idx, pg_mode, gdb, xlat, page_size, prot, &record);
 
     return mmu_translate_fpt(cs, addr, get_hphys_func, cr3, is_write1, mmu_idx, pg_mode, gdb, xlat, page_size, prot, NULL);
 #else 
